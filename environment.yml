@@ -2,11 +2,12 @@ name: example-environment
 channels:
   - conda-forge
 dependencies:
-  - python=3.6
+  - python=3.8
   - jupytext
   - jupyter
   - notebook
   - numpy
+  - pandas
   - psutil
   - toolz
   - matplotlib
