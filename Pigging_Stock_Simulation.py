@@ -4,12 +4,23 @@ import numpy as np
 import pandas as pd
 
 opg_stk_options = [80, 100, 120, 150]
+lead_time_norm = [5, 6]
+
+# Creating a combination of scenarios to run the simulation on PLT Lead Time and Pigging Opening Stock
+scenario_list = []
+
+for d in lead_time_norm:
+    for k in opg_stk_options:
+        scenario_list.append((d, k))
+
+lot_size = 50
 
 df_consol = pd.DataFrame(
     columns=['Day Count', 'Opg_Stk', 'Cons_Qty', 'PLT Lead Time', 'On Order Qty', 'Receipt Qty', 'Supply Lead Time',
-             'Cls_Stk', 'Scenario', 'Max_Order_Limit'])
+             'Cls_Stk', \
+             'Scenario', 'Max_Order_Limit', 'PLT_Lead_Time_Norm', "Stock_Out", "SO_Delay_Count"])
 
-for aa in opg_stk_options:
+for d, k in scenario_list:
 
     # Simulating the Pigging Consumption, Ordering and Order Receipt days
 
@@ -28,7 +39,7 @@ for aa in opg_stk_options:
     n = 0
 
     while n < z:
-        plt_lead_time = random.randrange(5, 8, 1)
+        plt_lead_time = random.randrange(d - 1, d + 3, 1)
         cons_day += plt_lead_time
         if random.randrange(1, 6) == 5:
             cons_qty = 100
@@ -38,16 +49,17 @@ for aa in opg_stk_options:
 
         order_qty = cons_qty
 
-        if order_qty == 50:
-            order_rec = order_day + random.randrange(4, 7, 1)
-        else:
-            order_rec = order_day + random.randrange(7, 9, 1)
-
         # adding integers to a list changes the type to string when used in a dataframe
         # creates a tuple (date of plt/order/receipt, qty, lead time)
         cons_day_list.append((cons_day, cons_qty, plt_lead_time))
         order_day_list.append((order_day, order_qty))
-        order_rec_list.append((order_rec, order_qty, order_rec - order_day))
+
+        # Receiving in multiples of lot sizes for bigger order sizes as per lead times advised by IMC
+        order_rec_count = 0
+        for i in range(order_qty // lot_size):
+            order_rec = order_day + random.randrange(4, 7, 1) * (order_rec_count + 1)
+            order_rec_list.append((order_rec, lot_size, order_rec - order_day))
+            order_rec_count += 1
         n += 1
 
     # Generating the data frame for N2 consumption
@@ -67,7 +79,7 @@ for aa in opg_stk_options:
     the other dataframes
     """
     # taking max of the days in cons_dataframe to create a total list of days to simulate
-    df_op_stk = pd.DataFrame({"Opg_Stk": np.repeat(aa, df_cons['Cons_Day'].max() + 1)})
+    df_op_stk = pd.DataFrame({"Opg_Stk": np.repeat(k, df_cons['Cons_Day'].max() + 1)})
     df_op_stk.reset_index(inplace=True)
     df_op_stk.rename(columns={'index': "Day Count"}, inplace=True)
 
@@ -85,15 +97,44 @@ for aa in opg_stk_options:
     # Running a for loop to re-assign the opg_stock from the previous row except for the first row
     for i in range(len(df_main)):
         if i == 0:
-            df_main.loc[i, "Opg_Stk"] = aa
+            df_main.loc[i, "Opg_Stk"] = k
         else:
             df_main.loc[i, "Opg_Stk"] = df_main.loc[i - 1, "Opg_Stk"] + df_main.loc[i - 1, "Receipt Qty"] - df_main.loc[
                 i - 1, "Cons_Qty"]
 
     df_main['Cls_Stk'] = df_main['Opg_Stk'] + df_main['Receipt Qty'] - df_main['Cons_Qty']
-    df_main = df_main.assign(Scenario=lambda x: "Opg Stk of " + str(aa))
-    df_main = df_main.assign(Max_Order_Limit=lambda x: aa)
+    df_main = df_main.assign(Scenario=lambda x: "Opg Stk of " + str(k))
+    df_main = df_main.assign(Max_Order_Limit=lambda x: k)
+    df_main = df_main.assign(PLT_Lead_Time_Norm=lambda x: "PLT Lead Time of " + str(d))
+
+    # Creating a column for indicating Stock Outs
+    df_main.assign(Stock_Out=lambda x: 0)
+    for i in range(len(df_main)):
+        if df_main.loc[i, 'Cons_Qty'] > 0:
+            if df_main.loc[i, 'Opg_Stk'] + df_main.loc[i, 'Receipt Qty'] - df_main.loc[i, 'Cons_Qty'] < 0:
+                df_main.loc[i, "Stock_Out"] = 1
+            else:
+                df_main.loc[i, "Stock_Out"] = 0
+        else:
+            df_main.loc[i, "Stock_Out"] = 0
+
+    # Creating a column for indicating the length of the Stock Outs
+    df_main.assign(SO_Delay_Count=lambda x: 0)
+    for i in range(len(df_main)):
+        if df_main.loc[i, 'Stock_Out'] == 1:
+            z = 0
+            for a in range(i, len(df_main)):
+                if df_main.loc[a, "Cls_Stk"] < 0:
+                    z += 1
+                else:
+                    break
+            df_main.loc[i, "SO_Delay_Count"] = z
+
+        else:
+            df_main.loc[i, "SO_Delay_Count"] = 0
+
     df_consol = pd.concat([df_consol, df_main.reset_index()], ignore_index=True, join='inner')
 
 df_consol.set_index('Day Count', inplace=True)
+
 print(df_consol)
