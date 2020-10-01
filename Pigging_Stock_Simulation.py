@@ -1,26 +1,25 @@
 import random
-
+import math
 import numpy as np
 import pandas as pd
 
-opg_stk_options = [80, 100, 120, 150]
-lead_time_norm = [5, 6]
+opg_stk_options = [50, 100, 150]  # Opening Stock of N2 cylinders
+lead_time_norm = [5, 6, 7]  # No of Days between 2 PLTs
+order_lot = [(50, 4), (50, 5)]  # Order Lot Size and Replenishment Lead Time
 
 # Creating a combination of scenarios to run the simulation on PLT Lead Time and Pigging Opening Stock
 scenario_list = []
 
 for d in lead_time_norm:
     for k in opg_stk_options:
-        scenario_list.append((d, k))
+        for oo, tt in order_lot:
+            scenario_list.append((d, k, oo, tt))
 
-lot_size = 50
+df_consol = pd.DataFrame(columns=['Day Count', 'Opg_Stk', 'Cons_Qty', 'PLT Lead Time', 'On Order Qty', 'Receipt Qty', \
+                                  'Supply Lead Time', 'Cls_Stk', 'Scenario', 'Max_Order_Limit', 'PLT_Lead_Time_Norm', \
+                                  'Order_Lot', 'Order_Lead_Time_Norm', 'Stock_Out', 'SO_Delay_Count'])
 
-df_consol = pd.DataFrame(
-    columns=['Day Count', 'Opg_Stk', 'Cons_Qty', 'PLT Lead Time', 'On Order Qty', 'Receipt Qty', 'Supply Lead Time',
-             'Cls_Stk', \
-             'Scenario', 'Max_Order_Limit', 'PLT_Lead_Time_Norm', "Stock_Out", "SO_Delay_Count"])
-
-for d, k in scenario_list:
+for d, k, oo, tt in scenario_list:
 
     # Simulating the Pigging Consumption, Ordering and Order Receipt days
 
@@ -39,7 +38,7 @@ for d, k in scenario_list:
     n = 0
 
     while n < z:
-        plt_lead_time = random.randrange(d - 1, d + 3, 1)
+        plt_lead_time = random.randrange(d - 1, d + 2, 1)
         cons_day += plt_lead_time
         if random.randrange(1, 6) == 5:
             cons_qty = 100
@@ -56,20 +55,23 @@ for d, k in scenario_list:
 
         # Receiving in multiples of lot sizes for bigger order sizes as per lead times advised by IMC
         order_rec_count = 0
-        for i in range(order_qty // lot_size):
-            order_rec = order_day + random.randrange(4, 7, 1) * (order_rec_count + 1)
-            order_rec_list.append((order_rec, lot_size, order_rec - order_day))
+        for i in range(math.ceil(order_qty / oo)):
+            order_rec = order_day + random.randrange(tt - 1, tt + 2, 1) * (order_rec_count + 1)
+            order_bal = order_qty - oo * (order_rec_count)
+            rec_qty = min(order_bal, oo)
+            order_rec_list.append((order_rec, rec_qty, order_rec - order_day))
             order_rec_count += 1
         n += 1
 
     # Generating the data frame for N2 consumption
-    df_cons = pd.DataFrame(cons_day_list, columns=["Cons_Day", "Cons_Qty", "PLT Lead Time"])
+    df_cons = pd.DataFrame(cons_day_list, columns=['Cons_Day', 'Cons_Qty', 'PLT Lead Time'])
 
     # Generating the data frame for N2 order placement
-    df_ord_day = pd.DataFrame(order_day_list, columns=["Order_Day", "On Order Qty"])
+    df_ord_day = pd.DataFrame(order_day_list, columns=['Order_Day', 'On Order Qty'])
 
     # Generating the data frame for N2 order receipts
-    df_ord_rec = pd.DataFrame(order_rec_list, columns=["Order_Rec_Day", "Receipt Qty", "Supply Lead Time"])
+    df_ord_rec = pd.DataFrame(order_rec_list, columns=['Order_Rec_Day', 'Receipt Qty', 'Supply Lead Time'])
+    # Aggregating for different orders being received on the same day
     df_ord_rec = df_ord_rec.groupby('Order_Rec_Day').agg({'Receipt Qty': 'sum', "Supply Lead Time": 'max'})
     df_ord_rec.reset_index(inplace=True)
 
@@ -103,9 +105,13 @@ for d, k in scenario_list:
                 i - 1, "Cons_Qty"]
 
     df_main['Cls_Stk'] = df_main['Opg_Stk'] + df_main['Receipt Qty'] - df_main['Cons_Qty']
+
+    # Adding columns for Scenario Details
     df_main = df_main.assign(Scenario=lambda x: "Opg Stk of " + str(k))
     df_main = df_main.assign(Max_Order_Limit=lambda x: k)
     df_main = df_main.assign(PLT_Lead_Time_Norm=lambda x: "PLT Lead Time of " + str(d))
+    df_main = df_main.assign(Order_Lot=lambda x: "Order Lot of " + str(oo))
+    df_main = df_main.assign(Order_Lead_Time_Norm=lambda x: "Order Lot Supply Time of " + str(tt))
 
     # Creating a column for indicating Stock Outs
     df_main.assign(Stock_Out=lambda x: 0)
